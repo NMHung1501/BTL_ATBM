@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>LAN Encrypted File Transfer - Cyberpunk</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="scanlines"></div>
+  <header class="topbar">
+    <div class="brand">
+      <span class="neon">NEON</span> LAN-LOCK
+    </div>
+    <div class="mode">
+      <label class="pill">
+        <input type="radio" name="mode" value="sender" checked /> <span>Sender</span>
+      </label>
+      <label class="pill">
+        <input type="radio" name="mode" value="receiver" /> <span>Receiver</span>
+      </label>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="panel">
+      <h2>WebSocket</h2>
+      <div class="row">
+        <label for="wsUrl">WS URL</label>
+        <input id="wsUrl" type="text" value="ws://localhost:8000/ws" />
+      </div>
+      <div class="row">
+        <button id="btnConnect" class="btn">Connect</button>
+        <button id="btnSend" class="btn primary" disabled>Send encrypted package</button>
+        <button id="btnClear" class="btn ghost">Clear Log</button>
+      </div>
+      <div class="hint">Receiver cần chạy backend trước, Sender nhập WS URL tới Receiver.</div>
+    </section>
+
+    <section class="panel">
+      <h2>Payload</h2>
+
+      <div id="senderBox">
+        <div class="row">
+          <label for="filename">Filename (meta)</label>
+          <input id="filename" type="text" value="email.txt" />
+        </div>
+        <div class="row">
+          <label for="exp">Expiration (ISO, UTC)</label>
+          <input id="exp" type="text" placeholder="auto: now+24h" />
+        </div>
+        <div class="row">
+          <label for="fileInput">Chọn file email.txt</label>
+          <input id="fileInput" type="file" accept="text/plain" />
+        </div>
+        <div class="hint">Crypto thực thi trên backend theo đúng thuật toán yêu cầu.</div>
+      </div>
+
+      <div id="receiverBox" class="hidden">
+        <div class="hint">
+          Receiver sẽ tự tạo RSA keypair, rồi validate signature/hash và lưu file dưới tên <b>email.txt</b>.
+        </div>
+      </div>
+    </section>
+
+    <section class="panel console">
+      <h2>Console / Terminal</h2>
+      <div id="log" class="log"></div>
+    </section>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
+
