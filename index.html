@@ -1,75 +1,51 @@
 <!doctype html>
-<html lang="vi">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>LAN Encrypted File Transfer - Cyberpunk</title>
-  <link rel="stylesheet" href="style.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LAN Encrypted Transfer</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/forge/1.3.1/forge.min.js"></script>
+  <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
-  <div class="scanlines"></div>
-  <header class="topbar">
-    <div class="brand">
-      <span class="neon">NEON</span> LAN-LOCK
-    </div>
-    <div class="mode">
-      <label class="pill">
-        <input type="radio" name="mode" value="sender" checked /> <span>Sender</span>
-      </label>
-      <label class="pill">
-        <input type="radio" name="mode" value="receiver" /> <span>Receiver</span>
-      </label>
-    </div>
-  </header>
+  <div class="app">
+    <header>
+      <h1>Cyberpunk LAN Encrypted Transfer</h1>
+      <p>FastAPI WebSocket + AES-CBC + RSA(2048) + SHA-512</p>
+    </header>
 
-  <main class="grid">
-    <section class="panel">
-      <h2>WebSocket</h2>
-      <div class="row">
-        <label for="wsUrl">WS URL</label>
-        <input id="wsUrl" type="text" value="ws://localhost:8000/ws" />
-      </div>
-      <div class="row">
-        <button id="btnConnect" class="btn">Connect</button>
-        <button id="btnSend" class="btn primary" disabled>Send encrypted package</button>
-        <button id="btnClear" class="btn ghost">Clear Log</button>
-      </div>
-      <div class="hint">Receiver cần chạy backend trước, Sender nhập WS URL tới Receiver.</div>
-    </section>
+    <section class="card">
+      <div class="grid grid--2">
+        <div class="panel">
+          <h2 class="panel__title">Step 1: Receiver</h2>
+          <div class="hint">Trên máy Receiver chạy:</div>
+          <div class="hint" style="margin-top:8px;">
+            <code>uvicorn app:app --host 0.0.0.0 --port 8000</code>
+          </div>
+          <div class="row" style="margin-top:14px;">
+            <a class="linkButton" href="./receiver.html">Open receiver.html</a>
+          </div>
+        </div>
 
-    <section class="panel">
-      <h2>Payload</h2>
-
-      <div id="senderBox">
-        <div class="row">
-          <label for="filename">Filename (meta)</label>
-          <input id="filename" type="text" value="email.txt" />
+        <div class="panel">
+          <h2 class="panel__title">Step 2: Sender</h2>
+          <div class="hint">Mở sender.html ở máy Sender, trỏ WS URL tới IP của Receiver.</div>
+          <div class="row" style="margin-top:14px;">
+            <a class="linkButton" href="./sender.html">Open sender.html</a>
+          </div>
+          <div class="hint" style="margin-top:10px;">
+            Lưu ý: không bật UI tamper. Bạn sẽ tự sửa 1 byte trong <code>artifacts/</code> theo yêu cầu.
+          </div>
         </div>
-        <div class="row">
-          <label for="exp">Expiration (ISO, UTC)</label>
-          <input id="exp" type="text" placeholder="auto: now+24h" />
-        </div>
-        <div class="row">
-          <label for="fileInput">Chọn file email.txt</label>
-          <input id="fileInput" type="file" accept="text/plain" />
-        </div>
-        <div class="hint">Crypto thực thi trên backend theo đúng thuật toán yêu cầu.</div>
       </div>
 
-      <div id="receiverBox" class="hidden">
+      <div class="row" style="margin-top:14px;">
         <div class="hint">
-          Receiver sẽ tự tạo RSA keypair, rồi validate signature/hash và lưu file dưới tên <b>email.txt</b>.
+          Files chính: <code>sender.html</code> (người gửi) &nbsp;•&nbsp; <code>receiver.html</code> (người nhận)
         </div>
       </div>
     </section>
-
-    <section class="panel console">
-      <h2>Console / Terminal</h2>
-      <div id="log" class="log"></div>
-    </section>
-  </main>
-
-  <script src="script.js"></script>
+  </div>
 </body>
 </html>
 

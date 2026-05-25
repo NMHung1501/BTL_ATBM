@@ -1,11 +1,13 @@
-# TODO - LAN Encrypted File Transfer (FastAPI WebSocket)
+# TODO
 
-- [ ] Tạo backend: `crypto_utils.py` (AES-CBC, RSA 2048 PKCS#1 v1.5, SHA-512 hash, sign/verify)
-- [ ] Tạo backend: `app.py` (FastAPI host=0.0.0.0, WebSocket handshake + bắt buộc luồng crypto theo đề bài)
-- [ ] Tạo frontend: `index.html` (Sender/Receiver mode toggle, console/terminal UI)
-- [ ] Tạo frontend: `style.css` (Cyberpunk UI)
-- [ ] Tạo frontend: `script.js` (WebSocket + log realtime + gửi/nhận payload)
-- [ ] Tạo `requirements.txt`
-- [ ] Tạo `README.md` (hướng dẫn chạy trên 2 máy LAN + mô tả hàm/luồng chi tiết)
-- [ ] Chạy thử: install deps + start backend + test gửi file (ACK/NACK)
+- [ ] Create full project structure (backend + frontend + keys + artifacts placeholder)
+- [ ] Implement `crypto_utils.py` with AES-CBC, RSA PKCS#1 v1.5 + SHA-512 signature, deterministic metadata serialization, hash SHA-512(IV||cipher||exp)
+- [ ] Implement `app.py` FastAPI WebSocket `/ws` with strict protocol/state machine, ACK/NACK, role enforcement, tamper 1 byte mode
+- [ ] Create `requirements.txt`
+- [ ] Create frontend: `index.html`, `style.css`, `script.js` with Sender/Receiver toggle, connect/send UI, tamper checkbox, real-time console logs
+- [ ] Create `README.md` with clear LAN 2-machine instructions and firewall notes, key copy requirement
+- [ ] Generate initial sender keypair (on first run) and persist to `keys/`
+- [ ] Create artifacts on Sender encrypt stage (`aes_cipher.bin`, `aes_iv.bin`, `packet.json`)
+- [ ] Run end-to-end test locally (2 instances) and validate NACK reason is `Hash Mismatch` in tamper mode
+- [ ] Produce final explanation file (simple, easy-to-understand) covering functions/flow/features
 

@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Receiver - LAN Encrypted Transfer</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/forge/1.3.1/forge.min.js"></script>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>Receiver • RSA decrypt AES + Verify Signature Hash</h1>
+      <p>Nhận packet → verify exp → decrypt AES key → decrypt plaintext → verify RSA signature trên hash → so sánh hash</p>
+    </header>
+
+    <section class="card">
+      <div class="grid grid--2">
+        <div class="panel">
+          <h2 class="panel__title">1) Connect</h2>
+          <div class="row">
+            <label class="label">WS URL</label>
+            <input id="wsUrl" value="ws://0.0.0.0:8000/ws" />
+          </div>
+          <div class="row">
+            <button id="connectBtn">Connect</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2 class="panel__title">2) Keys</h2>
+          <div class="row">
+            <label class="label">Receiver private key (receiver_private_key.pem) để decrypt AES key</label>
+            <textarea id="receiverPrivateKey" class="textArea" placeholder="Paste PEM private key" spellcheck="false"></textarea>
+          </div>
+          <div class="row">
+            <label class="label">Sender public key (sender_public_key.pem) để verify chữ ký hash</label>
+            <textarea id="senderPublicKey" class="textArea" placeholder="Paste PEM public key" spellcheck="false"></textarea>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2 class="panel__title">3) Offline (thủ công decrypt + verify)</h2>
+
+          <div class="row">
+            <label class="label">Bản mã IV (Base64)</label>
+            <textarea id="ivInput" class="textArea" placeholder="Base64 iv (từ artifacts/packet.json)" spellcheck="false"></textarea>
+          </div>
+          <div class="row">
+            <label class="label">Bản mã AES-Cipher (Base64)</label>
+            <textarea id="cipherInput" class="textArea" placeholder="Base64 cipher (từ artifacts/packet.json)" spellcheck="false"></textarea>
+          </div>
+          <div class="row">
+            <label class="label">Bản mã AES Key (RSA Wrap - enc_session_key, Base64)</label>
+            <textarea id="encSessionKeyInput" class="textArea" placeholder="Base64 enc_session_key (từ artifacts/packet.json)" spellcheck="false"></textarea>
+          </div>
+          <div class="row">
+            <label class="label">Bản mã HASH (hex)</label>
+            <textarea id="hashInput" class="textArea" placeholder="hash hex (từ artifacts/packet.json)" spellcheck="false"></textarea>
+          </div>
+          <div class="row">
+            <label class="label">Bản mã SIG (Base64)</label>
+            <textarea id="sigInput" class="textArea" placeholder="Base64 sig (từ artifacts/packet.json)" spellcheck="false"></textarea>
+          </div>
+          <div class="row">
+            <label class="label">Hạn exp (ISO-8601 UTC, dạng ...Z)</label>
+            <textarea id="expInput" class="textArea" placeholder="exp (từ artifacts/packet.json), ví dụ 2026-05-24T10:00:00Z" spellcheck="false"></textarea>
+          </div>
+          <div class="row">
+            <label class="label">Filename (metadata, default email.txt)</label>
+            <input id="filenameInput" value="email.txt" />
+          </div>
+
+
+          <div class="row">
+            <button id="btnProcessPacket" disabled type="button">Decrypt & Verify (Offline)</button>
+          </div>
+
+          <div class="row row--tight">
+            <div class="hint">Kết quả sẽ so sánh hash và verify signature metadata theo đúng spec.</div>
+          </div>
+        </div>
+
+
+        <div class="panel">
+          <h2 class="panel__title">4) Results</h2>
+          <div class="row">
+            <label class="label">AES key (sau khi giải mã)</label>
+            <textarea id="aesKeyOut" class="textArea" readonly spellcheck="false"></textarea>
+          </div>
+          <div class="row">
+            <label class="label">Plaintext (sau khi decrypt)</label>
+            <textarea id="plainOut" class="textArea" readonly spellcheck="false"></textarea>
+          </div>
+          <div class="row">
+            <label class="label">Hash từ packet (signature payload)</label>
+            <textarea id="hashFromSig" class="textArea" readonly spellcheck="false"></textarea>
+          </div>
+          <div class="row">
+            <label class="label">Hash băm lại plaintext</label>
+            <textarea id="hashRecomputed" class="textArea" readonly spellcheck="false"></textarea>
+          </div>
+          <div class="row">
+            <label class="label">Kết quả toàn vẹn</label>
+            <div class="hint" id="integrityResult"></div>
+          </div>
+        </div>
+
+        <div class="panel panel--wide">
+          <h2 class="panel__title">Console</h2>
+          <div class="console" id="console"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script src="./receiver_offline_crypto.js"></script>
+  <script src="./receiver.js"></script>
+
+</body>
+</html>

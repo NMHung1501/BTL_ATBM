@@ -1,103 +1,87 @@
-# LAN Encrypted File Transfer (FastAPI WebSocket + PyCryptodome)
+# LAN Encrypted File Transfer (FastAPI WebSocket + Crypto Spec)
 
-## 1) Mô tả chung
-Ứng dụng gồm:
-- Backend `app.py`: FastAPI chạy WebSocket endpoint `/ws` trên `host=0.0.0.0`.
-- `crypto_utils.py`: tách hàm AES-CBC, RSA-2048 (PKCS#1 v1.5), ký/verify RSA+SHA-512, và hash SHA-512.
-- Frontend: `index.html`, `style.css`, `script.js`.
+## 1) Yêu cầu
+- Python 3.10+
+- Wi-Fi/LAN cùng mạng (cùng subnet)
+- Mở firewall inbound cho port backend
 
-Luồng bắt buộc:
-- **Handshake**: Sender gửi `Hello!` → Receiver trả `Ready!`
-- **Trao đổi khóa**: Receiver tạo RSA-2048 gửi public key cho Sender.
-- **Ký metadata**: Sender ký metadata `{filename, timestamp}` bằng RSA/SHA-512.
-- **Mã hóa session key**: Sender mã hóa AES session key bằng RSA PKCS#1 v1.5.
-- **Mã hóa file AES-CBC** + **hash SHA-512(IV || ciphertext || expiration)**
-- Receiver: verify hash + verify chữ ký + kiểm tra `now <= exp` (24h), rồi ACK/NACK.
-
-> Lưu ý kỹ thuật: Cách trình bày UI chỉ mô tả theo yêu cầu. Việc crypto thực thi trên backend để đảm bảo đúng thuật toán/padding.
-
-## 2) Cài đặt thư viện
-Mở terminal ở thư mục dự án `d:/BTL_ATBM`:
+## 2) Cài đặt
 ```bash
 pip install -r requirements.txt
 ```
 
-## 3) Chạy trên 2 máy LAN
-### Máy Receiver (nơi sẽ nhận và lưu file)
-1. Chạy backend:
+## 3) Cấu trúc
+- `app.py` : FastAPI + WebSocket endpoint `/ws`
+- `crypto_utils.py` : AES-CBC/RSA PKCS#1 v1.5 + SHA-512 (signature + integrity)
+- `keys/`
+  - `sender_private_key.pem` (Sender auto tạo lần chạy đầu)
+  - `sender_public_key.pem` (Sender ghi ra để Receiver verify)
+- `artifacts/` : lưu ciphertext raw bytes + packet.json + file giải mã
+
+## 4) Chạy Receiver (máy 1)
 ```bash
-python app.py
+uvicorn app:app --host 0.0.0.0 --port 8000
 ```
-Backend sẽ listen trên `http://0.0.0.0:8000` (WebSocket dùng đường dẫn `/ws`).
+Mở port inbound **8000** trong Windows Firewall.
 
-2. Firewall: cần cho phép inbound TCP cổng **8000**.
+## 5) Lấy IP Receiver (Windows 11)
+Trên máy Receiver:
+- Mở `cmd` chạy:
+  ```bash
+  ipconfig
+  ```
+- Lấy **IPv4 Address** của card Wi-Fi (ví dụ: `192.168.1.10`).
 
-### Máy Sender (máy gửi)
-1. Mở `index.html` bằng trình duyệt.
-2. Ở chế độ **Sender**, nhập WS URL trỏ tới IP của Receiver:
-- Ví dụ (Receiver IP = 192.168.1.10):
-  - `ws://192.168.1.10:8000/ws`
-3. Chọn file `email.txt` (text/plain), set expiration (mặc định có nút auto: now+24h nếu bạn nhập `auto`).
-4. Bấm **Connect** → **Send encrypted package**.
+## 6) Copy public key từ Sender sang Receiver (bắt buộc)
+- Khởi chạy Sender *ít nhất 1 lần* để auto tạo key:
+  - Trong repo sẽ tạo `keys/sender_public_key.pem`
+- Copy file **`keys/sender_public_key.pem`** sang thư mục `keys/` trên máy Receiver.
 
-## 4) Tìm IP trên Windows 11
-Trên mỗi máy:
-- Mở CMD và chạy:
-```cmd
-ipconfig
-```
-- Lấy dòng **IPv4 Address** của card đang dùng Wi-Fi (ví dụ `192.168.x.x`).
+## 7) Chạy Sender (máy 2)
+- Mở file `index.html` bằng trình duyệt trên máy Sender (khuyến nghị Chrome/Edge).
+- Set WS URL:
+  - `ws://<receiver-ip>:8000/ws`
 
-## 5) Kiểm tra kết quả
-- Receiver sẽ lưu file dưới tên: `email.txt` (ngay trong thư mục chạy backend).
-- Console/Terminal UI hiển thị log theo thời gian thực:
-  - `[+] ... Handshake/Keys/Encrypt/Hash/Validate/ACK|NACK`
+## 8) Test bình thường
+- Chọn Mode = **Sender** ở máy Sender, nhấn **Connect**
+- Chọn Mode = **Receiver** ở máy Sender? (không cần) 
+  - Receiver đã chạy bằng uvicorn ở máy 1.
+- Quay lại Sender, nhấn **Send**
+- Receiver sẽ lưu file giải mã vào `artifacts/email.txt` và trả `ACK`.
 
-## 6) File Explanation (hàm + luồng chi tiết)
-### `crypto_utils.py`
-- `generate_iv(block_size=16) -> bytes`
-  - Tạo IV ngẫu nhiên cho AES-CBC.
-- `aes_encrypt_cbc(aes_key, iv, plaintext) -> bytes`
-  - AES mode CBC, dùng PKCS#7 padding.
-- `aes_decrypt_cbc(aes_key, iv, ciphertext) -> bytes`
-  - Giải mã + unpad.
-- `rsa_generate_keypair_2048()`
-  - Tạo keypair RSA 2048 bit.
-- `rsa_encrypt_pkcs1_v1_5(public_key, message) -> bytes`
-  - RSA encryption với padding PKCS#1 v1.5.
-- `rsa_decrypt_pkcs1_v1_5(private_key, ciphertext) -> bytes`
-  - Decrypt PKCS#1 v1.5.
-- `rsa_sign_sha512(message, private_key) -> bytes`
-  - Tính SHA-512(message) rồi sign bằng RSA PKCS#1 v1.5.
-- `rsa_verify_sha512(message, signature, public_key) -> bool`
-  - Verify chữ ký.
-- `sha512_hex(iv, ciphertext, exp_iso) -> str`
-  - Tính hash theo yêu cầu: SHA-512(IV || ciphertext || expiration).
-- `b64e/b64d`: base64 encode/decode phục vụ JSON.
+## 9) Test integrity (tamper 1 byte)
+- Trên UI (Sender): tick checkbox **Tamper 1 byte**
+- Nhấn **Send**
+- Kỳ vọng Receiver trả:
+  - `NACK` reason: **`Hash Mismatch`**
 
-### `app.py` (backend WebSocket `/ws`)
-WebSocket xử lý 1 phiên theo kết nối:
-1. **Handshake**
-   - Nhận message đầu:
-     - Sender: nhận `Hello!` và trả `Ready!`
-     - Receiver: trả `Ready!` ngay.
-2. **Receiver tạo RSA keypair**
-   - Tạo RSA-2048, lưu private/public theo kết nối.
-   - Gửi `{type:"public_key", public_key_pem: ...}` cho Sender.
-3. **Sender (trên cùng backend) gửi plaintext payload**
-   - UI Sender chỉ gửi `{filename, plaintext_b64, exp}`.
-   - Backend tạo session AES key, tạo metadata `{filename, timestamp}` từ exp,
-     sau đó ký metadata, encrypt session key bằng RSA public key của receiver,
-     encrypt file AES-CBC và tính hash SHA-512(IV||cipher||exp).
-   - Backend đóng gói thành packet JSON và gửi cho Receiver.
-4. **Receiver verify & giải mã**
-   - Kiểm tra timeout: `now > exp_dt` ⇒ NACK.
-   - Verify chữ ký RSA/SHA-512 trên metadata bytes.
-   - Compute lại hash SHA-512 và so sánh với `hash` trong packet.
-   - Nếu OK: decrypt AES-CBC và lưu thành `email.txt`.
-   - Gửi `ACK` hoặc `NACK`.
+## 10) Receiver offline: dán “bản mã” từ packet.json vào các ô
+Sender sẽ ghi packet đúng protocol vào `artifacts/packet.json`. Receiver offline chỉ cần mở file này và copy:
 
-## 7) Ghi chú về an toàn
-- Bài lab theo yêu cầu thuật toán/hàm cụ thể.
-- Trong thực tế sản phẩm, nên dùng TLS và cơ chế key exchange chuẩn hơn (hybrid + AEAD), nhưng ở đây tuân thủ đề bài.
+**“Bản mã”** nghĩa là dữ liệu đã được mã hóa/bọc theo crypto spec (khác với “plaintext”). Cụ thể:
+- **Bản mã IV (Base64)**  ← `packet.json.iv` (IV cho AES-CBC)
+- **Bản mã AES-Cipher (Base64)** ← `packet.json.cipher` (ciphertext của file đã AES-CBC encrypt)
+- **Bản mã AES Key (RSA Wrap - enc_session_key, Base64)** ← `packet.json.enc_session_key` (AES key đã bị RSA bọc/khóa bằng public key receiver)
+- **Bản mã HASH (hex)** ← `packet.json.hash` (SHA-512(IV || ciphertext || exp)) để kiểm integrity)
+- **Bản mã SIG (Base64)** ← `packet.json.sig` (chữ ký RSA trên metadata = filename + exp)
+- **Hạn exp (ISO-8601 UTC...)** ← `packet.json.exp` (hạn timeout để chống replay)
+- **Filename** ← `packet.json.filename` (mặc định `email.txt`)
+
+
+Sau đó:
+- dán keys: `receiver_private_key.pem` + `sender_public_key.pem`
+- bấm **Decrypt & Verify (Offline)**.
+
+
+
+## 10) Ghi chú về artifacts/ (sửa 1 byte để tự test)
+Khi Sender mã hóa xong sẽ ghi:
+- `artifacts/aes_cipher.bin` (ciphertext raw)
+- `artifacts/aes_iv.bin` (IV raw)
+- `artifacts/packet.json` (packet gửi thực tế)
+
+Để thử “đổi 1 byte” thủ công:
+- Mở `aes_cipher.bin` bằng editor hex,
+- đổi 1 byte ngẫu nhiên,
+- run lại Send trong UI với tamper mode để đảm bảo hash mismatch.
 

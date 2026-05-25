@@ -1,331 +1,295 @@
 import json
 import os
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from typing import Dict, Any, Optional, Tuple
 
+from Crypto.PublicKey import RSA
+from Crypto.Random import get_random_bytes
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 
-from Crypto.PublicKey import RSA
-
 from crypto_utils import (
-    rsa_generate_keypair_2048,
-    rsa_encrypt_pkcs1_v1_5,
-    rsa_decrypt_pkcs1_v1_5,
-    rsa_sign_sha512,
-    rsa_verify_sha512,
-    aes_encrypt_cbc,
-    aes_decrypt_cbc,
-    generate_iv,
-    sha512_hex,
-    b64e,
+    aes256_cbc_decrypt,
+    aes256_cbc_encrypt,
     b64d,
+    b64e,
+    deterministic_metadata_bytes,
+    exp_is_valid,
+    ensure_dir,
+    packet_hash_sha512,
+    rsa_decrypt_pkcs1v15,
+    rsa_encrypt_pkcs1v15,
+    rsa_load_private_key_pem,
+    rsa_load_public_key_pem,
+    rsa_sign_metadata_sha512_pkcs1v15,
+    rsa_verify_metadata_sha512_pkcs1v15,
+    tamper_one_byte,
 )
-
 
 app = FastAPI()
 
-# ===== dirs =====
-ROOT_DIR = Path(__file__).resolve().parent
-KEY_DIR = ROOT_DIR / "keys"
-ARTIFACT_DIR = ROOT_DIR / "artifacts"
+KEYS_DIR = "keys"
+ARTIFACTS_DIR = "artifacts"
 
-KEY_DIR.mkdir(parents=True, exist_ok=True)
-ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
+SENDER_PRIVATE_KEY_PATH = os.path.join(KEYS_DIR, "sender_private_key.pem")
+SENDER_PUBLIC_KEY_PATH = os.path.join(KEYS_DIR, "sender_public_key.pem")
 
-# key files for imports/exports (for lab/debug; each transfer uses freshly generated keys by default)
-SENDER_PRIVATE_PEM = KEY_DIR / "sender_private.pem"
-SENDER_PUBLIC_PEM = KEY_DIR / "sender_public.pem"
-RECEIVER_PRIVATE_PEM = KEY_DIR / "receiver_private.pem"
-RECEIVER_PUBLIC_PEM = KEY_DIR / "receiver_public.pem"
-
-# artifacts latest_* (what you edit manually to tamper)
-ART_LATEST_PACKET_JSON = ARTIFACT_DIR / "latest_packet.json"
-ART_LATEST_CIPHERTEXT_BIN = ARTIFACT_DIR / "latest_ciphertext.bin"  # AES-CBC ciphertext
-ART_LATEST_IV_BIN = ARTIFACT_DIR / "latest_iv.bin"
-ART_LATEST_ENC_SESSIONKEY_BIN = ARTIFACT_DIR / "latest_enc_session_key.bin"  # RSA encrypted AES key
-ART_LATEST_ENC_HASH_BIN = ARTIFACT_DIR / "latest_signature.bin"  # RSA encrypted hash of plaintext (lab naming)
-ART_LATEST_HASH_PLAINTEXT_TXT = ARTIFACT_DIR / "latest_hash_plaintext.txt"  # hex string
-ART_LATEST_EXP_TXT = ARTIFACT_DIR / "latest_exp.txt"
-ART_LATEST_FILENAME_TXT = ARTIFACT_DIR / "latest_filename.txt"
+RECEIVER_PRIVATE_KEY_PATH = os.path.join(KEYS_DIR, "receiver_private_key.pem")
+RECEIVER_PUBLIC_KEY_PATH = os.path.join(KEYS_DIR, "receiver_public_key.pem")
 
 
-# simplistic per-connection state
-receivers: Dict[str, Dict[str, Any]] = {}
+def _isoZ_plus_seconds(seconds: int) -> str:
+    dt = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(seconds=seconds)
+    return dt.isoformat().replace("+00:00", "Z")
+
+
+def generate_sender_keypair_if_needed() -> None:
+    ensure_dir(KEYS_DIR)
+    if os.path.exists(SENDER_PRIVATE_KEY_PATH) and os.path.exists(SENDER_PUBLIC_KEY_PATH):
+        return
+
+    key = RSA.generate(2048)
+    private_pem = key.export_key(format="PEM")
+    public_pem = key.publickey().export_key(format="PEM")
+
+    with open(SENDER_PRIVATE_KEY_PATH, "wb") as f:
+        f.write(private_pem)
+    with open(SENDER_PUBLIC_KEY_PATH, "wb") as f:
+        f.write(public_pem)
+
+
+def generate_receiver_keypair_if_needed() -> None:
+    ensure_dir(KEYS_DIR)
+    if os.path.exists(RECEIVER_PRIVATE_KEY_PATH) and os.path.exists(RECEIVER_PUBLIC_KEY_PATH):
+        return
+
+    key = RSA.generate(2048)
+    private_pem = key.export_key(format="PEM")
+    public_pem = key.publickey().export_key(format="PEM")
+
+    with open(RECEIVER_PRIVATE_KEY_PATH, "wb") as f:
+        f.write(private_pem)
+    with open(RECEIVER_PUBLIC_KEY_PATH, "wb") as f:
+        f.write(public_pem)
+
+
+def _read_plaintext_from_disk() -> bytes:
+    ensure_dir(ARTIFACTS_DIR)
+    candidates = [
+        os.path.join(ARTIFACTS_DIR, "plain_email.txt"),
+        os.path.join(ARTIFACTS_DIR, "email.txt"),
+    ]
+    for pth in candidates:
+        if os.path.exists(pth):
+            with open(pth, "rb") as f:
+                return f.read()
+    return b""
 
 
 @app.get("/")
 def index():
-    return HTMLResponse(
-        "Frontend nằm ở index.html. Hãy mở index.html trên trình duyệt hoặc serve static thông qua server."
-    )
-
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def parse_iso8601(s: str) -> datetime:
-    return datetime.fromisoformat(s.replace("Z", "+00:00"))
-
-
-def build_metadata_bytes(filename: str, exp_iso: str) -> bytes:
-    meta = {"filename": filename, "timestamp": exp_iso}
-    return json.dumps(meta, separators=(",", ":"), sort_keys=True).encode("utf-8")
-
-
-def ensure_bytes_len_for_aes_key(key: bytes) -> bytes:
-    # AES CBC requires 16/24/32 bytes. We use 32.
-    if len(key) in (16, 24, 32):
-        return key
-    raise ValueError(f"Invalid AES key length: {len(key)}")
-
-
-def write_artifacts_for_transfer(
-    *,
-    filename: str,
-    exp_iso: str,
-    iv: bytes,
-    ciphertext: bytes,
-    enc_session_key: bytes,
-    enc_hash_plaintext: bytes,
-    packet: Dict[str, Any],
-) -> None:
-    # write editable files for tampering
-    ART_LATEST_FILENAME_TXT.write_text(filename, encoding="utf-8")
-    ART_LATEST_EXP_TXT.write_text(exp_iso, encoding="utf-8")
-    ART_LATEST_IV_BIN.write_bytes(iv)
-    ART_LATEST_CIPHERTEXT_BIN.write_bytes(ciphertext)
-    ART_LATEST_ENC_SESSIONKEY_BIN.write_bytes(enc_session_key)
-    ART_LATEST_ENC_HASH_BIN.write_bytes(enc_hash_plaintext)
-    ART_LATEST_HASH_PLAINTEXT_TXT.write_text(packet["hash_plaintext_hex"], encoding="utf-8")
-
-    # full json payload
-    ART_LATEST_PACKET_JSON.write_text(json.dumps(packet, indent=2), encoding="utf-8")
-
-
-def load_rsa_keypair_from_pem(pem_path: Path) -> RSA.RsaKey:
-    if not pem_path.exists():
-        raise FileNotFoundError(str(pem_path))
-    return RSA.import_key(pem_path.read_bytes())
-
-
-def rsa_encrypt_raw_private_like(hash_bytes_hex: str, sender_private: RSA.RsaKey) -> bytes:
-    """
-    We need: encrypt the hex-string hash (plaintext hash) with RSA private key.
-
-    Requirement you gave: "bản text băm xong => mã hash . lấy mã hash đó + private key để mã hóa đoạn hash đó".
-
-    PyCryptodome RSA raw private 'encryption' is equivalent to RSA sign operation.
-    We implement signing of the hash bytes directly using PKCS#1 v1.5/SHA-512.
-
-    But you want RSA over the already computed hash value.
-    To keep deterministic and verifiable, we sign SHA-512 of the ASCII hash_hex string.
-
-    Then receiver verifies by verifying RSA signature of the same message.
-
-    However your described test compares hashes after decrypt AES.
-    We will follow your logic exactly by defining:
-      - plaintext_hash_hex = SHA512(plaintext) as hex.
-      - sig = RSA_sign_SHA512(plaintext_hash_hex_bytes, sender_private)
-      - receiver validates by RSA_verify_SHA512(plaintext_hash_hex_bytes, sig, sender_public)
-
-    This is consistent with RSA+SHA-512 requirement and uses PKCS#1 v1.5.
-    """
-    # We reuse rsa_sign_sha512 / rsa_verify_sha512 helpers.
-    msg = hash_bytes_hex.encode("utf-8")
-    return rsa_sign_sha512(msg, sender_private)
-
-
-def rsa_verify_raw_private_like(hash_bytes_hex: str, signature: bytes, sender_public: RSA.RsaKey) -> bool:
-    msg = hash_bytes_hex.encode("utf-8")
-    return rsa_verify_sha512(msg, signature, sender_public)
+    return HTMLResponse("WS file transfer running. Open index.html on Sender side.")
 
 
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
     await ws.accept()
-    role: Optional[str] = None
 
     try:
-        # Step 1: Handshake
-        hello = await ws.receive_text()
-        if hello == "Hello!":
-            role = "sender"
-        elif hello == "Receiver!":
-            role = "receiver"
-        else:
-            await ws.send_text("Unknown!")
-            await ws.close()
-            return
+        sender_hello_ok = False
+        role = None  # "sender" | "receiver"
+        receiver_rsa_key = None
 
-        await ws.send_text("Ready!")
+        # Step 1: Handshake (expect Sender: "Hello!")
+        first_msg = await ws.receive_text()
+        if first_msg == "Hello!":
+            sender_hello_ok = True
+            await ws.send_text("Ready!")
 
-        # Step 2-4 follow
+        # Step 1b: Role assignment (Sender sends "sender", Receiver sends "receiver")
+        while role is None:
+            m = await ws.receive_text()
+            if m in ("sender", "receiver"):
+                role = m
+
+        if role == "receiver" and not sender_hello_ok:
+            await ws.send_text("Ready!")
+
         if role == "receiver":
-            # receiver creates RSA keypair
-            receiver_priv, receiver_pub = rsa_generate_keypair_2048()
-            receivers[str(id(ws))] = {
-                "private": receiver_priv,
-                "public": receiver_pub,
-            }
-            await ws.send_text(
-                json.dumps(
-                    {
-                        "type": "public_key",
-                        "public_key_pem": receiver_pub.export_key().decode("utf-8"),
-                    }
-                )
-            )
+            # Step 2: Receiver creates RSA keypair and sends public key PEM to Sender
+            receiver_rsa_key = RSA.generate(2048)
+            receiver_public_key_pem = receiver_rsa_key.publickey().export_key(format="PEM").decode("utf-8")
+            await ws.send_text(json.dumps({"type": "public_key", "public_key_pem": receiver_public_key_pem}))
 
-            # wait for sender payload
-            payload_text = await ws.receive_text()
-            payload = json.loads(payload_text)
-
-            # payload contains:
-            # {
-            #   filename, exp,
-            #   iv (b64), ciphertext (b64),
-            #   enc_session_key (b64),
-            #   enc_hash_plaintext (b64)  (called sig in payload for UI)
-            #   sender_public_key_pem
-            # }
-            filename = payload.get("filename", "email.txt")
-            exp_iso = payload["exp"]
-
-            # timeout check (24h validity)
-            exp_dt = parse_iso8601(exp_iso)
-            if utc_now() > exp_dt:
-                await ws.send_text(json.dumps({"type": "NACK", "reason": "Timeout/Expired"}))
-                return
-
-            iv = b64d(payload["iv"])
-            ciphertext = b64d(payload["ciphertext"])
-            enc_session_key = b64d(payload["enc_session_key"])
-            enc_hash_plaintext = b64d(payload["enc_hash_plaintext"])
-            sender_pub_pem = payload["sender_public_key_pem"]
-            sender_pub = RSA.import_key(sender_pub_pem)
-
-            # decrypt session key
-            receiver_priv = receivers[str(id(ws))]["private"]
-            session_key = rsa_decrypt_pkcs1_v1_5(receiver_priv, enc_session_key)
+            # Receiver must load sender public key from keys/sender_public_key.pem
             try:
-                session_key = ensure_bytes_len_for_aes_key(session_key)
-            except Exception:
-                await ws.send_text(json.dumps({"type": "NACK", "reason": "Session Key invalid"}))
+                sender_public_key = rsa_load_public_key_pem(SENDER_PUBLIC_KEY_PATH)
+            except FileNotFoundError:
+                await ws.send_text(json.dumps({"type": "NACK", "reason": "Missing sender_public_key.pem"}))
                 return
 
-            # decrypt file
+            # Receive encrypted packet
+            while True:
+                incoming = await ws.receive_text()
+                try:
+                    data = json.loads(incoming)
+                except json.JSONDecodeError:
+                    await ws.send_text(json.dumps({"type": "NACK", "reason": "Invalid JSON"}))
+                    continue
+
+                if data.get("type") != "encrypted_packet":
+                    await ws.send_text(json.dumps({"type": "NACK", "reason": "Unexpected message type"}))
+                    continue
+
+                await ws.send_text(json.dumps({"type": "log", "message": "[+] Đang verify hash/chữ ký + ACK/NACK"}))
+
+                exp_iso = data.get("exp")
+                if not exp_iso or not exp_is_valid(exp_iso):
+                    await ws.send_text(json.dumps({"type": "NACK", "reason": "Timeout/Expired"}))
+                    continue
+
+                try:
+                    iv = b64d(data["iv"])
+                    ciphertext = b64d(data["cipher"])
+                    sig = b64d(data["sig"])
+                    enc_session_key = b64d(data["enc_session_key"])
+                    filename = data.get("filename", "email.txt")
+                except Exception:
+                    await ws.send_text(json.dumps({"type": "NACK", "reason": "Invalid packet encoding"}))
+                    continue
+
+                # Verify signature over deterministic metadata
+                metadata = {"filename": filename, "exp": exp_iso}
+                metadata_bytes = deterministic_metadata_bytes(metadata)
+
+                sig_ok = rsa_verify_metadata_sha512_pkcs1v15(metadata_bytes, sig, sender_public_key)
+                if not sig_ok:
+                    await ws.send_text(json.dumps({"type": "NACK", "reason": "Invalid Signature/Integrity"}))
+                    continue
+
+                # Verify hash integrity: SHA-512(IV || ciphertext || exp)
+                actual_hash = packet_hash_sha512(iv, ciphertext, exp_iso)
+                if str(data.get("hash")).lower() != actual_hash.lower():
+                    await ws.send_text(json.dumps({"type": "NACK", "reason": "Hash Mismatch"}))
+                    continue
+
+                # Decrypt AES key and ciphertext
+                try:
+                    aes_key = rsa_decrypt_pkcs1v15(enc_session_key, receiver_rsa_key)
+                    plaintext = aes256_cbc_decrypt(ciphertext, aes_key, iv)
+                except Exception:
+                    await ws.send_text(json.dumps({"type": "NACK", "reason": "Decrypt Failed"}))
+                    continue
+
+                ensure_dir(ARTIFACTS_DIR)
+                out_path = os.path.join(ARTIFACTS_DIR, filename)
+                with open(out_path, "wb") as f:
+                    f.write(plaintext)
+
+                await ws.send_text(json.dumps({"type": "ACK", "status": "Success", "saved_as": filename}))
+
+        elif role == "sender":
+            generate_sender_keypair_if_needed()
+            generate_receiver_keypair_if_needed()
+
+            # Load receiver public key from file
             try:
-                plaintext = aes_decrypt_cbc(session_key, iv, ciphertext)
-            except Exception:
-                await ws.send_text(json.dumps({"type": "NACK", "reason": "AES Decrypt Failed"}))
+                receiver_public_key = rsa_load_public_key_pem(RECEIVER_PUBLIC_KEY_PATH)
+            except FileNotFoundError:
+                await ws.send_text(json.dumps({"type": "NACK", "reason": "Missing receiver_public_key.pem"}))
                 return
 
-            # compute plaintext hash
-            plaintext_hash_hex = sha512_hex(iv, ciphertext, exp_iso)
-            # NOTE: sha512_hex in crypto_utils is SHA512(IV||cipher||exp)
-            # For your updated requirement, plaintext hash should be SHA-512(plaintext bytes).
-            # crypto_utils lacks helper for SHA512(plaintext). We'll compute inline via RSA verify.
-            # We MUST recompute properly:
-            from Crypto.Hash import SHA512
+            # Sender waits for send_request
+            while True:
+                incoming = await ws.receive_text()
+                try:
+                    req = json.loads(incoming)
+                except json.JSONDecodeError:
+                    continue
+                if req.get("type") != "send_request":
+                    continue
 
-            h = SHA512.new(plaintext)
-            plaintext_hash_hex = h.hexdigest()
+# tamper mode removed (manual integrity test via editing artifacts/packet.json or aes_cipher.bin)
+                packet_tamper_requested = False
+                filename = (req.get("filename") or "email.txt").strip()
+                # Tăng TTL để tránh demo/round-trip chậm bị Timeout/Expired
+                # exp dùng như thời hạn để receiver chấp nhận (demo theo yêu cầu: 24h)
+                exp_iso = _isoZ_plus_seconds(0)
 
-            # verify signature (RSA over hash_hex string) using sender public key
-            sig_ok = rsa_verify_raw_private_like(plaintext_hash_hex, enc_hash_plaintext, sender_pub)
-            if not sig_ok:
-                await ws.send_text(json.dumps({"type": "NACK", "reason": "Integrity/Signature mismatch"}))
-                return
 
-            # additionally compute SHA512(IV||cipher||exp) only for debug logging
-            _hash_debug = sha512_hex(iv, ciphertext, exp_iso)
 
-            # Save file
-            out_name = "email.txt"
-            with open(out_name, "wb") as f:
-                f.write(plaintext)
+                metadata = {"filename": filename, "exp": exp_iso}
+                metadata_bytes = deterministic_metadata_bytes(metadata)
 
-            await ws.send_text(json.dumps({"type": "ACK", "status": "Success", "saved_as": out_name}))
-            return
+                # AES session key + IV (prefer fixed key if exists)
+                fixed_aes_key_path = os.path.join(KEYS_DIR, "fixed_aes_key.bin")
+                fixed_aes_key = None
+                if os.path.exists(fixed_aes_key_path):
+                    try:
+                        fixed_aes_key = open(fixed_aes_key_path, "rb").read().strip()
+                    except Exception:
+                        fixed_aes_key = None
+                    if fixed_aes_key is not None and len(fixed_aes_key) != 32:
+                        fixed_aes_key = None
 
-        else:
-            # sender role
-            # receive receiver public key already sent by receiver
-            receiver_pub_text = await ws.receive_text()
-            receiver_pub_msg = json.loads(receiver_pub_text)
-            receiver_pub = RSA.import_key(receiver_pub_msg["public_key_pem"])
+                aes_key = fixed_aes_key if fixed_aes_key is not None else get_random_bytes(32)
+                iv = get_random_bytes(16)
 
-            # receive user plaintext package from UI
-            req_text = await ws.receive_text()
-            req = json.loads(req_text)
+                plaintext = b""
+                if isinstance(req.get("plaintext"), str):
+                    plaintext = req.get("plaintext").encode("utf-8")
+                if not plaintext:
+                    plaintext = _read_plaintext_from_disk()
 
-            filename = req.get("filename", "email.txt")
-            exp_iso = req.get("exp")
-            if not exp_iso:
-                exp_iso = (utc_now() + timedelta(hours=24)).replace(microsecond=0).isoformat()
+                await ws.send_text(json.dumps({"type": "log", "message": "[+] Đang mã hóa AES-CBC..."}))
+                ciphertext = aes256_cbc_encrypt(plaintext, aes_key, iv)
 
-            plaintext_b64 = req["plaintext_b64"]
-            plaintext = b64d(plaintext_b64)
+                # Hash per required formula
+                hash_hex = packet_hash_sha512(iv, ciphertext, exp_iso)
 
-            # receiver public key encryption session key (RSA PKCS#1 v1.5)
-            session_key = os.urandom(32)
-            session_key = ensure_bytes_len_for_aes_key(session_key)
-            enc_session_key = rsa_encrypt_pkcs1_v1_5(receiver_pub, session_key)
+                # RSA encrypt session key
+                enc_session_key = rsa_encrypt_pkcs1v15(aes_key, receiver_public_key)
 
-            # AES-CBC encrypt
-            iv = generate_iv()
-            ciphertext = aes_encrypt_cbc(session_key, iv, plaintext)
+                # Sign metadata
+                sender_private_key = rsa_load_private_key_pem(SENDER_PRIVATE_KEY_PATH)
+                sig_raw = rsa_sign_metadata_sha512_pkcs1v15(metadata_bytes, sender_private_key)
 
-            # hash plaintext (SHA-512(plaintext)) => hex string
-            from Crypto.Hash import SHA512
+                # Save artifacts for tamper testing + requested "folder"
+                ensure_dir(ARTIFACTS_DIR)
+                session_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                session_dir = os.path.join(ARTIFACTS_DIR, f"{session_id}")
+                ensure_dir(session_dir)
 
-            h = SHA512.new(plaintext)
-            plaintext_hash_hex = h.hexdigest()
+                # Always store original values
+                with open(os.path.join(session_dir, "aes_cipher.bin"), "wb") as f:
+                    f.write(ciphertext)
+                with open(os.path.join(session_dir, "aes_iv.bin"), "wb") as f:
+                    f.write(iv)
+                # Store enc_session_key bytes (what receiver uses to decrypt AES key)
+                with open(os.path.join(session_dir, "enc_session_key.bin"), "wb") as f:
+                    f.write(enc_session_key)
 
-            # signature: RSA private over hash_hex string (PKCS#1 v1.5 + SHA-512)
-            sender_priv, sender_pub = rsa_generate_keypair_2048()
-            sig = rsa_encrypt_raw_private_like(plaintext_hash_hex, sender_priv)
+                # Store packet.json exactly
+                ciphertext_to_send = ciphertext
+                if packet_tamper_requested:
+                    ciphertext_to_send = tamper_one_byte(ciphertext)
 
-            payload = {
-                "type": "encrypted_package_v2",
-                "filename": filename,
-                "exp": exp_iso,
-                "iv": b64e(iv),
-                "ciphertext": b64e(ciphertext),
-                "enc_session_key": b64e(enc_session_key),
-                "enc_hash_plaintext": b64e(sig),
-                "sender_public_key_pem": sender_pub.export_key().decode("utf-8"),
-                # debug extra fields
-                "hash_plaintext_hex": plaintext_hash_hex,
-            }
+                packet = {
+                    "type": "encrypted_packet",
+                    "iv": b64e(iv),
+                    "cipher": b64e(ciphertext_to_send),
+                    "hash": hash_hex,
+                    "sig": b64e(sig_raw),
+                    "exp": exp_iso,
+                    "enc_session_key": b64e(enc_session_key),
+                    "filename": filename,
+                }
 
-            # write artifacts for manual tamper
-            write_artifacts_for_transfer(
-                filename=filename,
-                exp_iso=exp_iso,
-                iv=iv,
-                ciphertext=ciphertext,
-                enc_session_key=enc_session_key,
-                enc_hash_plaintext=sig,
-                packet=payload,
-            )
+                with open(os.path.join(session_dir, "packet.json"), "w", encoding="utf-8") as f:
+                    json.dump(packet, f, ensure_ascii=False, indent=2)
 
-            await ws.send_text(json.dumps(payload))
-
-            # ACK/NACK
-            ack = await ws.receive_text()
-            await ws.send_text(ack)
-            return
+                await ws.send_text(json.dumps({"type": "log", "message": "[+] Đang verify hash/chữ ký + ACK/NACK"}))
+                await ws.send_text(json.dumps(packet))
 
     except WebSocketDisconnect:
-        return
-    except Exception as e:
-        try:
-            await ws.send_text(json.dumps({"type": "NACK", "reason": f"Server error: {e}"}))
-        except Exception:
-            pass
         return
 

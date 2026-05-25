@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sender - LAN Encrypted Transfer</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>Sender • AES-CBC + RSA wrap + Sign Hash</h1>
+      <p>Nhập email → băm SHA-512 → mã hóa AES-CBC → bọc AES key bằng RSA → ký RSA trên Hash → gửi packet</p>
+    </header>
+
+    <section class="card">
+      <div class="grid grid--2">
+        <div class="panel">
+          <h2 class="panel__title">1) Connect</h2>
+          <div class="row">
+            <label class="label">WS URL</label>
+            <input id="wsUrl" value="ws://127.0.0.1:8000/ws" />
+          </div>
+          <div class="row">
+            <button id="connectBtn">Connect</button>
+          </div>
+          <div class="row">
+            <label class="label">Receiver public key (receiver_public_key.pem)</label>
+            <textarea id="receiverPublicKey" class="textArea" placeholder="Paste PEM public key" spellcheck="false"></textarea>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2 class="panel__title">2) Payload</h2>
+          <div class="row">
+            <label class="label">Email content</label>
+            <textarea id="emailInput" class="textArea" placeholder="Nhập nội dung email" spellcheck="false">Xin chào! Đây là email.txt để kiểm thử.</textarea>
+          </div>
+          <div class="row">
+            <label class="label">Filename</label>
+            <input id="filenameInput" value="email.txt" />
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2 class="panel__title">3) AES key</h2>
+          <div class="row">
+            <label class="label">AES key (32 bytes) hex/base64</label>
+            <textarea id="aesKeyInput" class="textArea" placeholder="Ví dụ hex: 64 chars hoặc base64" spellcheck="false"></textarea>
+          </div>
+          <div class="row">
+            <button id="btnUseGeneratedAes" type="button">Tự tạo AES key</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2 class="panel__title">4) Hash + Sign</h2>
+          <div class="row">
+            <button id="btnHash" disabled type="button">1) Băm SHA-512</button>
+            <button id="btnSignHash" disabled type="button">2) Ký RSA trên Hash</button>
+          </div>
+          <div class="row">
+            <label class="label">Hash (SHA-512 of email)</label>
+            <textarea id="hashOut" class="textArea" readonly placeholder="Hash sẽ hiện tại đây" spellcheck="false"></textarea>
+          </div>
+          <div class="row">
+            <label class="label">Sender private key (sender_private_key.pem) để ký</label>
+            <textarea id="senderPrivateKey" class="textArea" placeholder="Paste PEM private key" spellcheck="false"></textarea>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2 class="panel__title">5) Encrypt & Send</h2>
+          <div class="row">
+            <button id="btnEncryptAES" disabled type="button">3) Mã hóa AES-CBC</button>
+            <button id="btnWrapAESKey" disabled type="button">4) Bọc AES key bằng RSA</button>
+          </div>
+
+          <div class="row">
+            <button id="btnSend" disabled type="button">5) Gửi encrypted_packet</button>
+          </div>
+
+          <div class="row row--tight">
+            <label class="label">Artifacts (để tamper thủ công)</label>
+            <div class="hint">Sender backend sẽ ghi: artifacts/aes_cipher.bin, artifacts/aes_iv.bin, artifacts/packet.json</div>
+          </div>
+        </div>
+
+        <div class="panel panel--wide">
+          <h2 class="panel__title">Console</h2>
+          <div class="console" id="console"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script src="./sender.js"></script>
+</body>
+</html>
+

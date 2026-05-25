@@ -1,0 +1,10 @@
+{
+  "type": "encrypted_packet",
+  "iv": "2ThB45QjnrjHdNQV45qPig==",
+  "cipher": "CyTK5Nt9RioV+euuAjmZcspZobq/YWjt4Q0Cmoi6EVLcmYQVa/VN2MFzhAKNYW0x6NUGPTFT2Zj3BkA6hUUN0w==",
+  "hash": "e9dcf99854a5b564986e7b65ed5a209a8c084fe7eedc2fc17d8a7632fc98ab73b9b86ea3ecad57a385eacc3a9f9da7bfd78e484066b006ed7b282b35d38cbc46",
+  "sig": "lAA7UTu0S2dJJVQIZB1tcmtHB8s6Z0uxMGHKAxlAe6yHzzv1RgA79mXavssxkRDfbHoN1vZUTGxA72RXu2kDToPg/tnphCqXk2qzBki4J6hvyW8P9ejo/vJLG4tz7rpj/pcURb8PLyoNBsf+KbtGrcG/+xxnumASi0SavTFq4i/MBpM8Ty0ogjebfrZSQTcKnTtoVnyLRJidRXuZIOJm1xMLheLMgDP805gLhylnJvJf7Mv4cvdeGeC+SuTDcnEj2OQ4fzF6TRHuN7LuowWUosfMARXUiB/FQDM5Re82Ck11geT+vlVYoyZXaZfzydem8Ra+qw9fSYsAPdquHsYGlw==",
+  "exp": "2026-05-24T16:50:58Z",
+  "enc_session_key": "YRX1vRLsdVQYgA1OfmMw4ZNoBEquNUgAzTnAWFUUwa+7lIkWd8WVS3c/tkdNeULQ/MKk6zp/wmcF847yF0Oj7/TiPDmSQzm7NFEyZ00WjexLTtfzooYKsgME6e0y+JZjUjdX7qcL2v4py8VwJ1XuY4sFnUOmFZM6/d02fepHZxbcii/0z2s6l9/ta2B14kCSl8ZA4yKg2BevjZfHZMB0CNXQdYPPue/cQFufAnDjfC2/9t2ytzZPkDmp/pMTVdStwNiDspbzREDq9fXMsgvVwZbUssqMMrwJ9esTPtxGOAeG4Ds2hl/Aignu4RmDjFYkGTHPnC34ByFwzP5ATySBYg==",
+  "filename": "email.txt"
+}

@@ -1,0 +1,74 @@
+# Giải thích nhanh (dễ hiểu) về project
+
+## Tổng quan
+Project này truyền một file (mặc định `email.txt`) giữa **Sender** và **Receiver** trong LAN bằng **WebSocket**.
+- FastAPI backend tạo endpoint `ws://<ip>:8000/ws`.
+- Sender mã hóa file bằng **AES-CBC**, sau đó mã hóa “AES session key” bằng **RSA 2048**.
+- Packet metadata được **RSA-sign** để Receiver verify.
+- Receiver cũng kiểm tra **hash integrity** để phát hiện sửa 1 byte trong ciphertext.
+
+## Luồng WebSocket (protocol bắt buộc)
+1. **Handshake**
+   - Sender gửi text: `"Hello!"`
+   - Receiver trả: `"Ready!"`
+2. **Role assignment**
+   - Sender gửi text: `"sender"`
+   - Receiver gửi text: `"receiver"`
+3. **Trao đổi khóa RSA**
+   - Receiver tạo RSA keypair (2048-bit) rồi gửi JSON:
+     ```json
+     {"type":"public_key", "public_key_pem":"..."}
+     ```
+4. **Sender gửi encrypted_packet**
+   - Sender tạo AES key (32 bytes), IV (16 bytes), encrypt nội dung file.
+   - Tạo metadata deterministically (JSON sort keys, compact).
+   - Sign metadata bằng `sender_private_key.pem` theo RSA PKCS#1 v1.5 + SHA-512.
+   - Hash theo công thức bắt buộc:
+     `SHA-512(IV || ciphertext || exp)`
+   - Gửi packet JSON có các field đúng spec.
+   - Nếu tick tamper mode: Sender **chỉ sửa 1 byte ciphertext trước khi gửi**, nhưng **hash vẫn giữ giá trị cũ** → Receiver phải báo `Hash Mismatch`.
+5. **Receiver verify & decrypt**
+   - Kiểm tra `exp` (now <= exp)
+   - Verify signature metadata bằng `keys/sender_public_key.pem`
+   - Tính lại hash và so sánh → nếu lệch: `NACK Hash Mismatch`
+   - Nếu hợp lệ: RSA decrypt session key, AES-CBC decrypt ciphertext, lưu file.
+   - Trả `ACK` hoặc `NACK` JSON đúng format.
+
+## crypto_utils.py (các hàm quan trọng)
+- `deterministic_metadata_bytes(metadata: dict) -> bytes`
+  - JSON stringify với `sort_keys=True` và `separators=(',', ':')` để signature luôn đúng byte.
+- `rsa_sign_metadata_sha512_pkcs1v15(metadata_bytes, sender_private_key)`
+  - Tạo hash SHA-512(metadata_bytes) và ký bằng PKCS#1 v1.5.
+- `rsa_verify_metadata_sha512_pkcs1v15(metadata_bytes, signature, sender_public_key)`
+  - Verify signature; trả True/False.
+- `aes256_cbc_encrypt(plaintext, key_32, iv)`
+  - AES-CBC + padding PKCS#7.
+- `aes256_cbc_decrypt(ciphertext, key_32, iv)`
+  - Giải mã + kiểm tra padding.
+- `packet_hash_sha512(iv, ciphertext, exp_iso)`
+  - Implement đúng công thức integrity:
+    `SHA-512(IV || ciphertext || expiration)`
+- `tamper_one_byte(ciphertext)`
+  - Lật 1 bit của 1 byte ngẫu nhiên trong ciphertext.
+
+## app.py (WebSocket state machine)
+- Tạo keypair Sender nếu thiếu:
+  - `generate_sender_keypair_if_needed()` tạo `keys/sender_private_key.pem` và `keys/sender_public_key.pem`.
+- **Receiver nhánh**:
+  - Load `keys/sender_public_key.pem` để verify signature metadata.
+  - Verify theo thứ tự: exp → signature → hash → decrypt.
+- **Sender nhánh**:
+  - Đợi `public_key` từ Receiver.
+  - Nhận `send_request` gồm cờ `tamper_1_byte` từ UI.
+  - Tạo packet và ghi artifacts trước khi gửi.
+
+## artifacts/
+Khi Sender encrypt xong, project ghi:
+- `artifacts/aes_cipher.bin` : ciphertext raw bytes (gốc)
+- `artifacts/aes_iv.bin` : IV raw bytes
+- `artifacts/packet.json` : packet JSON thực tế gửi
+
+Khi tick tamper mode:
+- ciphertext bị sửa 1 byte trước khi gửi,
+- nhưng `hash` vẫn là hash của ciphertext gốc → Receiver phát hiện bằng hash mismatch.
+
