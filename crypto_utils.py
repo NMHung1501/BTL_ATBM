@@ -34,18 +34,8 @@ def add_seconds_iso(exp_base_iso: str, seconds: int) -> str:
 def exp_is_valid(exp_iso: str) -> bool:
     dt = datetime.fromisoformat(exp_iso.replace("Z", "+00:00"))
     now = datetime.now(timezone.utc)
+    # The expiration time is already calculated and passed as exp_iso
     return now <= dt
-
-# Corrected code
-def exp_is_valid(exp_iso: str) -> bool:
-    dt = datetime.fromisoformat(exp_iso.replace("Z", "+00:00"))
-    now = datetime.now(timezone.utc)
-    
-    # Calculate the deadline by adding 24 hours to the creation time
-    expiration_time = dt + timedelta(hours=24)
-    
-    # Verify if the current time is still within the 24-hour window
-    return now <= expiration_time
 
 
 def sha512_hex(data: bytes) -> str:

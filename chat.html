@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CipherChat — Bảo mật tuyệt đối</title>
+  <meta name="description" content="Ứng dụng nhắn tin mã hóa đầu cuối cực kỳ dễ sử dụng." />
+  <link rel="stylesheet" href="./chat.css" />
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔐</text></svg>" />
+</head>
+<body>
+
+  <!-- ═══════════ Nền mờ nghệ thuật ═══════════ -->
+  <div class="ambient-background">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+  </div>
+
+  <!-- ═══════════ Login Overlay ═══════════ -->
+  <div class="login-overlay glass-panel active" id="loginOverlay">
+    <div class="login-card">
+      <div class="login-card__logo-wrapper">
+        <div class="login-card__logo">🔐</div>
+        <div class="login-card__glow"></div>
+      </div>
+      <h1 class="login-card__title">CipherChat</h1>
+      <p class="login-card__subtitle">
+        Trò chuyện an toàn trên mạng nội bộ<br/>
+        <span class="highlight">Mã hóa đầu cuối tự động 100%</span>
+      </p>
+
+      <div class="login-card__input-group">
+        <input
+          id="usernameInput"
+          class="login-card__input"
+          type="text"
+          placeholder="Nhập tên hiển thị của bạn..."
+          autocomplete="off"
+          maxlength="20"
+          autofocus
+        />
+        <div class="input-focus-border"></div>
+      </div>
+
+      <!-- Không cần người dùng nhập Server IP nữa, tự động phát hiện bằng JS -->
+
+      <button id="joinBtn" class="login-card__btn btn-glow" type="button">
+        Tham gia ngay
+      </button>
+
+      <div id="loginError" class="login-card__error"></div>
+
+      <div class="login-card__footer">
+        <svg class="icon-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+        Dữ liệu của bạn không lưu trữ trên bất kỳ máy chủ nào.
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ App Shell ═══════════ -->
+  <div class="app hidden" id="appShell">
+
+    <!-- Header -->
+    <header class="header glass-panel" id="header">
+      <div class="header__brand">
+        <div class="header__logo">🔐</div>
+        <span class="header__title">CipherChat</span>
+      </div>
+
+      <div class="header__status">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">Đang kết nối...</span>
+      </div>
+
+      <div class="header__actions" id="headerActions">
+        <button class="header__btn btn-outline" id="shareBtn" title="Chia sẻ phòng Chat">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+          Mời bạn bè
+        </button>
+        <div class="header__user" id="headerUser">
+          <div class="header__user-avatar" id="headerAvatar"></div>
+          <span id="headerUsername"></span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main -->
+    <div class="main">
+
+      <!-- Sidebar -->
+      <aside class="sidebar glass-panel" id="sidebar">
+        <div class="sidebar__header">
+          <div class="sidebar__title">Người dùng online</div>
+          <div class="sidebar__count" id="userCount">0 người</div>
+        </div>
+
+        <div class="sidebar__list" id="userList">
+          <!-- Populated by JS -->
+        </div>
+
+        <div class="sidebar__crypto-info">
+          <div class="crypto-badge" id="cryptoBadgeBtn">
+            <span class="crypto-badge__icon">🔒</span>
+            <span class="crypto-badge__text">Kết nối an toàn (Click để xem)</span>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Chat Area -->
+      <section class="chat glass-panel">
+        <div class="chat__messages" id="chatMessages">
+          <div class="chat__empty" id="emptyState">
+            <div class="chat__empty-icon-wrapper">
+              <div class="chat__empty-icon">💬</div>
+              <div class="chat__empty-glow"></div>
+            </div>
+            <div class="chat__empty-title">Phòng chat an toàn đã sẵn sàng!</div>
+            <div class="chat__empty-text">
+              Hãy mời bạn bè cùng mạng Wi-Fi tham gia bằng nút "Mời bạn bè" ở góc trên.<br/><br/>
+              Mọi tin nhắn đều được mã hóa bằng thuật toán chuẩn quân đội (AES-256 + RSA-2048) trước khi rời khỏi máy bạn.
+            </div>
+          </div>
+        </div>
+
+        <!-- Input Bar -->
+        <div class="input-bar glass-panel-inner" id="inputBar">
+          <textarea
+            id="messageInput"
+            class="input-bar__field"
+            placeholder="Nhập tin nhắn của bạn..."
+            rows="1"
+            autocomplete="off"
+          ></textarea>
+          <button id="sendBtn" class="input-bar__send btn-glow" type="button" disabled title="Gửi tin nhắn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+          </button>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ═══════════ Share Overlay ═══════════ -->
+  <div class="share-overlay glass-panel hidden" id="shareOverlay">
+    <div class="share-card">
+      <div class="share-card__header">
+        <h2>🔗 Mời bạn bè tham gia</h2>
+        <button class="share-card__close" id="shareCloseBtn" type="button">✕</button>
+      </div>
+      <div class="share-card__body">
+        <p>Bảo người bạn muốn chat dùng camera điện thoại hoặc trình duyệt quét mã QR dưới đây. <strong>Lưu ý: Phải cùng chung mạng Wi-Fi/LAN.</strong></p>
+        
+        <div class="qr-container">
+          <div id="qrcode" class="share-card__qr"></div>
+        </div>
+        
+        <div class="share-card__or"><span>HOẶC</span></div>
+        <p>Gửi đường link này cho họ:</p>
+        <div class="share-card__link-box">
+          <input type="text" id="shareLinkInput" readonly />
+          <button id="copyLinkBtn" class="btn-glow-small">Copy</button>
+        </div>
+        <div id="copyToast" class="copy-toast">Đã copy link!</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ Crypto Detail Panel ═══════════ -->
+  <div class="crypto-panel hidden" id="cryptoPanel">
+    <div class="crypto-panel__card glass-panel">
+      <div class="crypto-panel__header">
+        <div class="crypto-panel__title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" style="margin-right: 8px"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"></path></svg>
+          Báo cáo Bảo mật
+        </div>
+        <button class="crypto-panel__close" id="cryptoPanelClose" type="button">✕</button>
+      </div>
+      <div class="crypto-panel__grid" id="cryptoGrid">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="./chat.js"></script>
+</body>
+</html>
